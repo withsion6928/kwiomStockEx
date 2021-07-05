@@ -68,6 +68,7 @@ class Kiwoom(QAxWidget):
 
 
 
+
     def trdata_slot(self, sScrNo, sRQName, sTrCode, sRecordName, sPrevNext): ## tr 요청 후 결과 받는 부분
         '''
         tr요청을 받는 구역, 슬롯이다.
