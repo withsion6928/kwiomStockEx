@@ -189,3 +189,5 @@ class Kiwoom(QAxWidget):
 
         elif sRQName == "실시간미체결요청":
             print("47강~ 48 강  참조해랏 :https://youtu.be/MlPfJwn_6rA")
+
+
