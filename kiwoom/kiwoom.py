@@ -1,7 +1,9 @@
+import os
+
 from PyQt5.QAxContainer import *
 from PyQt5.QtCore import *
 from PyQt5.QtTest import QTest
-
+from config.kiwoomType import *
 from config.errorCode import *
 
 
@@ -9,7 +11,7 @@ class Kiwoom(QAxWidget):
     def __init__(self):
         super().__init__()
         print("Kiwom 클래스 입니다.")
-
+        self.realType = RealType()
         #####eventLoop 모듈
         self.login_event_loop = None
         self.detail_account_info_event_loop = None
@@ -18,14 +20,21 @@ class Kiwoom(QAxWidget):
         #######################
 
         ###스크린 번호 모음
+        self.screen_start_stop_info = "1000"
         self.screen_my_info = "2000"
         self.screen_calculation_stock = "4000"
+        self.screen_real_stock = "5000" ## 종목별로 할당할 스크린 번호
+        self.screen_meme_stock = "6000"  ## 종목별로 할당할 주문용 스크린 번호
 
         #######변수모듈####
         self.account_num = None
         self.account_stock_dict = {}
         self.not_account_stock_dic = {}
+        self.portfolio_stock_dict = {}
         #################
+        ##종목분석용
+        self.calcul_data = []
+
 
         ## 계좌 관련 변수##
 
@@ -41,7 +50,15 @@ class Kiwoom(QAxWidget):
         self.detail_account_info()  # 예수금
         self.detail_account_mystock()  # 계좌평가잔고내역요청
         ##self.not_cncs_ordr() #미체결
-        self.calculator_fnc()  # 종목 분석용 임시용으로 실행
+        ##self.calculator_fnc()  # 종목 분석용 임시용으로 실행
+
+
+        self.read_code()   ####저장된종목을 불러온다.
+        self.screen_number_settion() ##스크린 번호를 할당
+        self.dynamicCall("SetRealReg(QString, QString, QString, QString)", self.screen_start_stop_info, '', self.realType.REALTYPE['장시작시간']['장운영구분'],'0')
+
+
+
 
     def get_ocx_instance(self):
         self.setControl("KHOPENAPI.KHOpenAPICtrl.1")
@@ -49,6 +66,11 @@ class Kiwoom(QAxWidget):
     def event_slots(self):
         self.OnEventConnect.connect(self.login_slot)
         self.OnReceiveTrData.connect(self.trdata_slot)
+
+    def real_event_slots(self):
+        self.OnReceiveRealData.connect(self.realdata_slot)
+
+
 
     def login_slot(self, errCode):
         print(errCode)
@@ -239,12 +261,102 @@ class Kiwoom(QAxWidget):
             code = code.strip()
             print("%s 일봉데이터 요청 " % code)
 
-            rows = self.dynamicCall("GetRepeatCnt(QString, QString)", sTrCode, sRQName)
-            print(rows)
+            cnt = self.dynamicCall("GetRepeatCnt(QString, QString)", sTrCode, sRQName)
+
+            print("데이터 일수 : %s" % cnt)
+            #한번 조회 하면 600일치까지 일봉데이터를 받아올수 있다.
+            for i in range(cnt):
+                data = []
+                current_price = self.dynamicCall("GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, "현재가")
+                value = self.dynamicCall("GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i,"거래량")
+                trading_value= self.dynamicCall("GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i,"거래대금")
+                date = self.dynamicCall("GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i,"일자")
+                start_price = self.dynamicCall("GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i,"시가")
+                high_price = self.dynamicCall("GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i,"고가")
+                low_price = self.dynamicCall("GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i,"저가")
+
+                data.append("")
+                data.append(current_price.strip())
+                data.append(value.strip())
+                data.append(trading_value.strip())
+                data.append(date.strip())
+                data.append(start_price.strip())
+                data.append(high_price.strip())
+                data.append(low_price.strip())
+                data.append("")
+
+                self.calcul_data.append(data.copy())
+
+            ##print(self.calcul_data)
+
 
             if sPrevNext == "2":
                 self.day_kiwoom_db(code=code, sPrevNext=sPrevNext)
             else:
+                print("총 일수 :%s" % len(self.calcul_data))
+                #120일 이평선을 그릴만큼의 데이터가 있는지를 체크
+                pass_success = False
+
+                if self.calcul_data == None or len(self.calcul_data) < 120:
+                    pass_success = False
+                else:
+
+                    total_price = 0
+                    for value in self.calcul_data[:120]:
+                        total_price += int(value[1])#120일간의 종가를 다 더함
+
+                    moving_average_price = total_price / 120
+                    bottom_stock_price = False
+                    check_price = None
+                    if int(self.calcul_data[0][7]) <= moving_average_price and moving_average_price <= int(self.calcul_data[0][6]): #저가보다 높고 고가보다 낮고
+                        print("오늘 주가 120이평선에 걸쳐있는것 확인")
+                        bottom_stock_price = True
+                        check_price = int(self.calcul_data[0][6])
+                        prev_price = None # 과거의 120일선 위에 있는 일봉 저가
+                    if bottom_stock_price == True:
+                        moving_average_price_prev = 0
+                        price_top_moving = False
+
+                        idx = 1
+                        while True:
+                            if len(self.calcul_data[idx:]) < 120 :  #120일이치가 있는지 계속 확인
+                                print("120일치가 없음!")
+                                break
+
+                            total_price = 0
+                            for value in self.calcul_data[idx:120+idx]:
+                                total_price += int(value[1])
+                                moving_average_price_prev = total_price / 120
+
+                            if moving_average_price_prev <= int (self.calcul_data[idx][6]) and idx <= 20: ##20일전에 고가가
+                                print("20일동안 주가가 120일 이평선과 같거나 위에 있으면 조건 통과 못함 ")
+                                price_top_moving = False
+                                break
+                            elif int(self.calcul_data[idx][7]) > moving_average_price_prev and idx > 20:
+                                print("120일 이평선 위에 있는 일봉 확인됨  ")
+                                price_top_moving = True
+                                prev_price = int(self.calcul_data[idx][7])
+                                break
+                            idx += 1
+
+                        #해당 부분 이평선이 가장최근일자의 이평선 가격보다 낮은지 확인
+                        if price_top_moving == True:
+                            if moving_average_price > moving_average_price_prev and check_price > prev_price:
+                                print("포착된 이평선의 가격이 오늘자(최근일자) 이평선가격보다 낮은것으로 확인됨 ")
+                                print("포착된 부분의 일봉 저가가 오늘자 일봉의 고가보다 낮은지 확인됨")
+                                pass_success = True
+
+                if pass_success == True:
+                    print("조건부 통과됨 ")
+                    code_nm = self.dynamicCall("GetMasterCodeName(QString", code)
+
+                    f = open("files/condition_stock.txt", "a", encoding="utf8")
+                    f.write("$s\t%s\t%s\n" % (code, code_nm, str(self.calcul_data[0][1])))
+                    f.close()
+                elif pass_success == False:
+                    print("조건부 통과 못함")
+
+
                 self.calculator_event_loop.exit()
 
     def get_code_list_by_market(self, market_code):
@@ -275,3 +387,67 @@ class Kiwoom(QAxWidget):
                          self.screen_calculation_stock)
 
         self.calculator_event_loop.exec_()
+
+
+    def read_code(self):
+        if os.path.exists("files/condition_stock.txt"):
+            f = open("files/condition_stock.txt","r",encoding="utf8")
+            lines = f.readLine()
+            for line in lines:
+                if line != "":
+                    ls = line.split("\t")
+
+                    stock_code = ls[0]
+                    stock_name = ls[1]
+                    stock_price = int(ls[2].split("\n"))
+                    stock_price = abs(stock_price)
+                    self.portfolio_stock_dict.update({stock_code:{"종목명" : stock_name, "현재가" : stock_price}})
+
+            f.close()
+            print(self.portfolio_stock_dict)
+
+
+    def screen_number_settion(self):
+        screen_overwrite = []
+
+        for code in self.account_stock_dict.keys():
+            if code not in screen_overwrite:
+                screen_overwrite.append(code)
+
+
+        for order_number in self.not_account_stock_dic.keys():
+            code = self.not_account_stock_dic[order_number]['종목코드']
+
+            if code not in screen_overwrite:
+                screen_overwrite.append(order_number)
+
+        for code in self.portfolio_stock_dict.keys():
+            if code not in screen_overwrite:
+                screen_overwrite.append(code)
+
+        cnt = 0
+        for code in screen_overwrite:
+
+            temp_screen = int(self.screen_real_stock)
+            meme_screen = int(self.screen_meme_stock)
+
+            if (cnt % 50) == 0:
+                temp_screen += 1
+                self.screen_real_stock = str(temp_screen)
+
+            if (cnt % 50 ) == 0:
+                meme_screen += 1
+                self.screen_meme_stock = str(meme_screen)
+
+            if code in self.portfolio_stock_dict.keys():
+                self.portfolio_stock_dict[code].update({"스크린번호": str(self.screen_real_stock)})
+                self.portfolio_stock_dict[code].update({"주문용스크린번호": str(self.screen_meme_stock)})
+            elif code not in self.portfolio_stock_dict.keys():
+                self.portfolio_stock_dict.update({"스크린번호": str(self.screen_real_stock), "주문용스크린번호": str(self.screen_meme_stock)})
+
+            cnt += 1
+        print(self.portfolio_stock_dict)
+
+
+    def realdata_slot(self, sCode, sRealType, sRealData):
+        print(sCode)
