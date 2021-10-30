@@ -45,20 +45,26 @@ class Kiwoom(QAxWidget):
         ########################
         self.get_ocx_instance()
         self.event_slots()
+        self.real_event_slots()
+
+
         self.signal_login_commConnect()
         self.get_account_info()
         self.detail_account_info()  # 예수금
         self.detail_account_mystock()  # 계좌평가잔고내역요청
-        ##self.not_cncs_ordr() #미체결
-        ##self.calculator_fnc()  # 종목 분석용 임시용으로 실행
+        #self.not_cncs_ordr() #미체결
+        #self.calculator_fnc()  # 종목 분석용 임시용으로 실행
 
 
         self.read_code()   ####저장된종목을 불러온다.
         self.screen_number_settion() ##스크린 번호를 할당
         self.dynamicCall("SetRealReg(QString, QString, QString, QString)", self.screen_start_stop_info, '', self.realType.REALTYPE['장시작시간']['장운영구분'],'0')
 
-
-
+        for code in self.portfolio_stock_dict.keys():
+            screen_num = self.portfolio_stock_dict[code]['스크린번호']
+            fids = self.realType.REALTYPE['주식체결']['체결시간']
+            self.dynamicCall("SetRealReg(QString, QString, QString, QString)", screen_num, code, fids, '1')
+            print("실시간 등록 코드 : %s,  스크린번호: %s, fid번호: %s" % (code, screen_num, fids))
 
     def get_ocx_instance(self):
         self.setControl("KHOPENAPI.KHOpenAPICtrl.1")
@@ -450,4 +456,21 @@ class Kiwoom(QAxWidget):
 
 
     def realdata_slot(self, sCode, sRealType, sRealData):
-        print(sCode)
+
+        if sRealType == "장시작시간":
+            fid = self.realType.REALTYPE[sRealType]['장운영구분']
+            value = self.dynamicCall("GetCommRealData(QString, int)", sCode, fid)
+
+            if value == "0":
+                print("장 시작 전")
+            elif value == "3":
+                print("장 시작")
+            elif value == "2":
+                print("장 종료, 동시호가로 넘어감")
+            elif value == "4":
+                print("3시30분 장 종료")
+
+        elif sRealType == "주식체결":
+            print(sCode)
+
+
